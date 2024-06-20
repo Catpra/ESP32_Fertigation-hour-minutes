@@ -15,29 +15,20 @@ private:
     int m_nCount=0;
     int m_nCurrentIdx = 0;
     int m_nLastIndex = -1;
-    void (*onExecuteSchedule)(uint16_t arDuration[]) = nullptr;
+    void (*onExecuteSchedule)(const uint16_t arDuration[]) = nullptr;
 
 public:
-    Scheduler(void (*cbExecuteSchedule)(uint16_t arDuration[]));
-    void addTask(uint16_t nTime, uint16_t arDuration[]);
+    Scheduler(void (*cbExecuteSchedule)(const uint16_t arDuration[]));
+    void addTask(uint16_t nTime, const uint16_t arDuration[]);
     int  start(uint16_t now);
     void run(uint16_t now);
     int currentIdx() { return m_nCurrentIdx; }
     int count() { return m_nCount; }
     uint16_t nextScheduleTime() {
-    if (m_nCurrentIdx+1 < m_nCount)
-        return m_arTask[m_nCurrentIdx+1].nTime;
-    return m_arTask[0].nTime; 
-    }
-    
-    void cancelAllTasks() {
-    for (int i = 0; i < m_nCount; i++) {
-        m_arTask[i].fActive = false;
-    }
-        m_nCount = 0;
+        if (m_nCurrentIdx+1 < m_nCount)
+            return m_arTask[m_nCurrentIdx+1].nTime;
+        return m_arTask[0].nTime; 
     }
 private:    
     void sort();    
 };
-
-
