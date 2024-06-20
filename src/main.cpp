@@ -46,6 +46,7 @@ String ApiKey = "9a553a4d189678d8d2945eee265c3133";
 
 String lat = "-6.981779358476813";
 String lon = "110.41328171734197";
+String weatherDescription = "Unknown";
 
 Solenoid solenoid;
 Ticker ticker;
@@ -156,6 +157,7 @@ void loop() {
         const char* city = doc["name"];
         const char* country = doc["sys"]["country"];
         const char* description = doc["weather"][0]["description"];
+        weatherDescription = String(description);
         float temp = doc["main"]["temp"];
         float humidity = doc["main"]["humidity"];
         
@@ -175,15 +177,16 @@ void loop() {
 
         // Check if the weather description contains "rain"
         if (strstr(description, "rain") != NULL) {
-          // If it's raining, cancel all tasks
-          scheduler.cancelAllTasks();
-          Serial.println("It's raining. All tasks have been cancelled.");
+            scheduler.cancelAllTasks();
+            Serial.println("It's raining. All tasks have been cancelled.");
         }
       }
     } else {
       Serial.println("Error: Unable to fetch weather data");
     }
     http.end();
+  } else {
+    Serial.println("WiFi not connected");
   }
   
   // Wait for 30 seconds before next update
@@ -212,7 +215,7 @@ void ePaper_updateDisplay()
     epaperDisplay.setCursor(0, 1*15);
     epaperDisplay.print("   SMART IRRIGATION");
     epaperDisplay.setCursor(0, 3*15);
-    epaperDisplay.println("Weather: Sunny");
+    epaperDisplay.println("Weather: " + weatherDescription);
     epaperDisplay.println("Pump :ON");
     epaperDisplay.println("Valve:OFF OFF OFF");
     epaperDisplay.printf ("Sched:%02d of %02d ->%02d:%02d", 

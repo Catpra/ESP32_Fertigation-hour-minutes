@@ -25,6 +25,9 @@ public:
     int currentIdx() { return m_nCurrentIdx; }
     int count() { return m_nCount; }
     void cancelAllTasks() {
+    for (int i = 0; i < m_nCount; i++) {
+        m_arTask[i].fActive = false;
+    }
         m_nCount = 0;
     }
 private:    
