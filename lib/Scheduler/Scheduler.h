@@ -24,6 +24,9 @@ public:
     void run(uint16_t now);
     int currentIdx() { return m_nCurrentIdx; }
     int count() { return m_nCount; }
+    void cancelAllTasks() {
+        m_nCount = 0;
+    }
 private:    
     void sort();    
 };

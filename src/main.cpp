@@ -10,13 +10,17 @@ Example:
 */
 
 #include <Arduino.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 #include <stdarg.h>
 #include <Ticker.h>
 #include <RTClib.h>
+#include <NTPClient.h>
 #include <GxEPD2_BW.h>
 #include <Fonts/FreeMonoBold9pt7b.h>
 #include "Solenoid.h"
 #include "Scheduler.h"
+#include "ArduinoJson.h"
 
 GxEPD2_BW<GxEPD2_213_B74, GxEPD2_213_B74::HEIGHT> epaperDisplay(GxEPD2_213_B74(/*CS=5*/ 5, /*DC=*/ 17, /*RST=*/ 16, /*BUSY=*/ 4)); // GDEM0213B74 122x250, SSD1680
 enum TextAllign {ALLIGN_CENTER, ALLIGN_LEFT, ALLIGN_RIGHT};
@@ -31,6 +35,17 @@ RTC_DS3231 rtc;
 // ini adalah durasi output dalam Seconds
 const int8_t arSolenoidPin[NUM_OUTPUS] = {26, 27, 12};
 uint16_t arSolenoidActiveDuration[NUM_OUTPUS] = {2, 2, 2};
+
+const char* ssid = "Tamaki";
+const char* password = "wunangcepe";
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200, 60000);
+
+String URL = "http://api.openweathermap.org/data/2.5/weather?";
+String ApiKey = "9a553a4d189678d8d2945eee265c3133";
+
+String lat = "-6.981779358476813";
+String lon = "110.41328171734197";
 
 Solenoid solenoid;
 Ticker ticker;
@@ -68,6 +83,29 @@ void setup() {
   String message;
   Serial.begin(115200);
 
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+    unsigned long startTime = millis();
+    while (WiFi.status() != WL_CONNECTED) {
+      if (millis() - startTime > 10000) { // 10 seconds timeout
+          Serial.println("Failed to connect to WiFi within 10 seconds.");
+          break;
+      }
+    delay(2000);
+    Serial.println("Connecting to WiFi...");
+  }
+      if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Connected to WiFi");
+        // Initialize NTP client
+        timeClient.begin();
+        timeClient.update();
+        //buat ngecek apakah waktu sudah di set atau belum
+        Serial.print("NTP time: ");
+        Serial.println(timeClient.getFormattedTime());
+        // Set RTC time
+        rtc.adjust(DateTime(timeClient.getEpochTime()));
+      }
+
   // this will turn on motor pump after 1000ms and turn off after 2000ms
   solenoid.begin(NUM_OUTPUS, MOTOR_PIN, SOLENOID_ON_DELAY, SOLENOID_OFF_DELAY);
   solenoid.setSolenoidPins(arSolenoidPin);
@@ -90,7 +128,67 @@ void setup() {
 }
 
 void loop() {
+  // wait for WiFi connection
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    // Set HTTP Request Final URL with Location and API key information
+    http.begin(URL + "lat=" + lat + "&lon=" + lon + "&units=metric&appid=" + ApiKey);
+    
+    // start connection and send HTTP Request
+    int httpCode = http.GET();
+    
+    // httpCode will be negative on error
+    if (httpCode > 0) {
+      // Read Data as a JSON string
+      String JSON_Data = http.getString();
+      Serial.println("Raw JSON data:");
+      Serial.println(JSON_Data);
+      
+      // Retrieve some information about the weather from the JSON format
+      JsonDocument doc;
+      DeserializationError error = deserializeJson(doc, JSON_Data);
+      
+      if (error) {
+        Serial.print("deserializeJson() failed: ");
+        Serial.println(error.c_str());
+      } else {
+        // Extract and display the Current Weather Info
+        const char* city = doc["name"];
+        const char* country = doc["sys"]["country"];
+        const char* description = doc["weather"][0]["description"];
+        float temp = doc["main"]["temp"];
+        float humidity = doc["main"]["humidity"];
+        
+        Serial.println("\nCurrent Weather Information:");
+        Serial.print("Location: ");
+        Serial.print(city);
+        Serial.print(", ");
+        Serial.println(country);
+        Serial.print("Description: ");
+        Serial.println(description);
+        Serial.print("Temperature: ");
+        Serial.print(temp);
+        Serial.println(" °C");
+        Serial.print("Humidity: ");
+        Serial.print(humidity);
+        Serial.println(" %");
+
+        // Check if the weather description contains "rain"
+        if (strstr(description, "rain") != NULL) {
+          // If it's raining, cancel all tasks
+          scheduler.cancelAllTasks();
+          Serial.println("It's raining. All tasks have been cancelled.");
+        }
+      }
+    } else {
+      Serial.println("Error: Unable to fetch weather data");
+    }
+    http.end();
+  }
   
+  // Wait for 30 seconds before next update
+  Serial.println("\nWaiting 30 seconds before next update...");
+  delay(30000);
 }
 
 /*******************************************************************************************/
