@@ -42,7 +42,6 @@ const char* password = "wunangcepe";
 // WiFiUDP ntpUDP;
 // NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200, 60000);
 
-Ticker weatherTicker;
 String URL = "http://api.openweathermap.org/data/2.5/weather?";
 String ApiKey = "9a553a4d189678d8d2945eee265c3133";
 String lat = "-6.981779358476813";
@@ -50,6 +49,7 @@ String lon = "110.41328171734197";
 String weatherDescription = "Unknown";
 
 Solenoid solenoid;
+Ticker weatherTicker;
 Ticker ticker;
 Ticker ledBlinkOff;
 void onScheduleExecute(const uint16_t arDuration[]);
@@ -58,26 +58,13 @@ void ePaper_displayText(int row, TextAllign allign, const char* szFmt, ...);
 void ePaper_displayClock(const DateTime& now);
 void ePaper_displaySchedule();
 Scheduler scheduler(onScheduleExecute);
+uint16_t m_now=0000;
 
 void onScheduleExecute(uint16_t arDuration[]) {
   Serial.printf("onScheduleExecute %d of %d\n", scheduler.currentIdx()+1, scheduler.count());
-  // ePaper_displaySchedule(scheduler.currentIdx()+1, scheduler.count(), 10, 15);
   ePaper_displaySchedule();
   solenoid.setSolenoidDuration(arDuration);
   solenoid.start();
-}
-
-uint16_t currentTime()
-{
-  DateTime now = rtc.now();
-  return now.hour()*100 + now.minute();
-}
-
-void onTimer() {
-  DateTime now = rtc.now();
-  uint16_t t = now.hour()*100 + now.minute();
-  ePaper_displayClock(now);
-  scheduler.run(t);
 }
 
 void checkWeather() {
@@ -91,7 +78,7 @@ void checkWeather() {
       Serial.println("Raw JSON data:");
       Serial.println(JSON_Data);
       
-      StaticJsonDocument<1024> doc;
+      JsonDocument doc;
       DeserializationError error = deserializeJson(doc, JSON_Data);
       
       if (error) {
@@ -116,6 +103,19 @@ void checkWeather() {
   } else {
     Serial.println("WiFi not connected");
   }
+}
+
+uint16_t currentTime()
+{
+  DateTime now = rtc.now();
+  return now.hour()*100 + now.minute();
+}
+
+void onTimer() {
+  DateTime now = rtc.now();
+  uint16_t t = now.hour()*100 + now.minute();
+  ePaper_displayClock(now);
+  scheduler.run(t);
 }
 
 void setup() {
@@ -162,6 +162,7 @@ void setup() {
   Serial.println("System running...");
   ticker.attach(1, onTimer); 
   scheduler.start(currentTime());
+  weatherTicker.attach(1800, checkWeather);
 }
 
 void loop() {
