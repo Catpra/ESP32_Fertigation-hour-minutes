@@ -31,10 +31,12 @@ public:
     }
     void cancelAllTasks() {
         m_nCount = 0;
+        m_nCurrentIdx = 0;
+        for (int i = 0; i < MAX_SCHEDULER_COUNT; i++) {
+            m_arTask[i].fActive = false;
+        }
     }
 
 private:
     void sort();
 };
-
-extern void onScheduleExecute(uint16_t arDuration[]);
