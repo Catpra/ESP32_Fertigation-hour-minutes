@@ -1,14 +1,14 @@
 #include <Arduino.h>
 #include "Scheduler.h"
 
-Scheduler::Scheduler(void (*cbExecuteSchedule)(uint16_t arDuration[])) {
+Scheduler::Scheduler(void (*cbExecuteSchedule)(const uint16_t arDuration[])) {
     m_nCount = 0;
     m_nCurrentIdx = 0;
     m_nLastIndex = -1;
     onExecuteSchedule = cbExecuteSchedule;
 }
 
-void Scheduler::addTask(uint16_t nTime, uint16_t arDuration[]) {
+void Scheduler::addTask(uint16_t nTime, const uint16_t arDuration[]) {
     if (m_nCount < MAX_SCHEDULER_COUNT) {
         m_arTask[m_nCount].fActive = false;
         m_arTask[m_nCount].nTime = nTime;

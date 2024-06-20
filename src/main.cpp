@@ -62,7 +62,7 @@ void ePaper_displaySchedule();
 Scheduler scheduler(onScheduleExecute);
 uint16_t m_now=0000;
 
-void onScheduleExecute(uint16_t arDuration[]) {
+void onScheduleExecute(const uint16_t arDuration[]) {
   Serial.printf("onScheduleExecute %d of %d\n", scheduler.currentIdx()+1, scheduler.count());
   ePaper_displaySchedule();
   solenoid.setSolenoidDuration(arDuration);
