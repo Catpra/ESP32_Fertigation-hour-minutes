@@ -29,6 +29,12 @@ public:
             return m_arTask[m_nCurrentIdx+1].nTime;
         return m_arTask[0].nTime; 
     }
+    void cancelAllTasks() {
+    for (int i = 0; i < m_nCount; i++) {
+        m_arTask[i].fActive = false;
+    }
+        m_nCount = 0;
+    }
 private:    
     void sort();    
 };
