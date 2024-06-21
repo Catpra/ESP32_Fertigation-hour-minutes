@@ -54,12 +54,17 @@ Ticker ticker;
 Ticker ledBlinkOff;
 String weatherDescription = "Unknown";
 int weatherConditionCode = 0;
+
+
 void onScheduleExecute(const uint16_t arDuration[]);
 void ePaper_Init();
 void ePaper_displayText(int row, TextAllign allign, const char* szFmt, ...);
+void ePaper_updateDisplay();
 void ePaper_displayClock(const DateTime& now);
 void ePaper_displaySchedule();
 Scheduler scheduler(onScheduleExecute);
+bool shouldRunSchedule = false;
+bool hasCheckedWeather = false;
 uint16_t m_now=0000;
 
 void onScheduleExecute(const uint16_t arDuration[]) {
@@ -74,6 +79,22 @@ void onScheduleExecute(const uint16_t arDuration[]) {
 }
 
 
+void connectToWiFi() {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+    unsigned long startTime = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startTime < 10000) { // 10 seconds timeout
+        delay(1000);
+        Serial.println("Connecting to WiFi...");
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Connected to WiFi");
+    } else {
+        Serial.println("Failed to connect to WiFi within 10 seconds.");
+    }
+}
+
 uint16_t currentTime()
 {
   DateTime now = rtc.now();
@@ -87,128 +108,143 @@ void onTimer() {
   scheduler.run(t);
 }
 
-// void updateDisplayWithSolenoidStatus() {
-//     epaperDisplay.setFullWindow();
-//     epaperDisplay.firstPage();
-//     do {
-//         epaperDisplay.setCursor(0, 1 * 15);
-//         epaperDisplay.print("   SMART IRRIGATION");
-//         epaperDisplay.setCursor(0, 3 * 15);
-//         epaperDisplay.print("Weather: ");
-//         epaperDisplay.println(weatherDescription);
-//         epaperDisplay.print("Pump :");
-//         epaperDisplay.println(solenoid.isRunning() ? "ON" : "OFF");
-//         epaperDisplay.print("Valve:");
-//         for (int i = 0; i < NUM_OUTPUS; i++) {
-//             epaperDisplay.print(solenoid.isSolenoidOn(i) ? " ON" : " OFF");
-//         }
-//         epaperDisplay.println();
-//         epaperDisplay.printf("Sched:%02d of %02d ->%02d:%02d",
-//                              scheduler.currentIdx() + 1, scheduler.count(), 16, 15);
-//     } while (epaperDisplay.nextPage());
-// }
+void checkWeather() {
+    if (WiFi.status() == WL_CONNECTED) {
+        HTTPClient http;
+        http.begin(URL + "lat=" + lat + "&lon=" + lon + "&units=metric&appid=" + ApiKey);
+        int httpCode = http.GET();
+
+        Serial.printf("HTTP Code: %d\n", httpCode); // Debugging
+
+        if (httpCode > 0) {
+            String JSON_Data = http.getString();
+            Serial.println("Raw JSON data:");
+            Serial.println(JSON_Data);
+
+            JsonDocument doc;
+            DeserializationError error = deserializeJson(doc, JSON_Data);
+
+            if (error) {
+                Serial.print("deserializeJson() failed: ");
+                Serial.println(error.c_str());
+            } else {
+                const char* description = doc["weather"][0]["description"];
+                weatherConditionCode = doc["weather"][0]["id"];
+                weatherDescription = String(description);
+
+                Serial.print("Weather Description: ");
+                Serial.println(description);
+                Serial.printf("Weather Condition Code: %d\n", weatherConditionCode);
+
+                // Cancel tasks if weather condition is not clear sky (800)
+                if (weatherConditionCode != 800) {
+                    scheduler.cancelAllTasks();
+                    shouldRunSchedule = false;
+                    Serial.println("Weather is not clear. All tasks have been cancelled.");
+                } else {
+                    shouldRunSchedule = true;
+                }
+
+                hasCheckedWeather = true;
+                ePaper_Init(); // Update display with new weather info
+            }
+        } else {
+            Serial.println("Error: Unable to fetch weather data");
+        }
+        http.end();
+    } else {
+        Serial.println("WiFi not connected. Running schedule by default.");
+        shouldRunSchedule = true;
+        hasCheckedWeather = true;
+    }
+}
+
+
 
 void setup() {
-  Serial.begin(115200);
+    Serial.begin(115200);
+    connectToWiFi();
 
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-    unsigned long startTime = millis();
-    while (WiFi.status() != WL_CONNECTED) {
-      if (millis() - startTime > 10000) { // 10 seconds timeout
-          Serial.println("Failed to connect to WiFi within 10 seconds.");
-          break;
-      }
-    Serial.println("Connecting to WiFi...");
-  }
-      if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("Connected to WiFi");
-      HTTPClient http;
-      http.begin(URL + "lat=" + lat + "&lon=" + lon + "&units=metric&appid=" + ApiKey);
-      int httpCode = http.GET();
-      
-      if (httpCode > 0) {
-        String JSON_Data = http.getString();
-        Serial.println("Raw JSON data:");
-        Serial.println(JSON_Data);
-        
-        JsonDocument doc;
-        DeserializationError error = deserializeJson(doc, JSON_Data);
-        
-        if (error) {
-          Serial.print("deserializeJson() failed: ");
-          Serial.println(error.c_str());
-        } else {
-            const char* description = doc["weather"][0]["description"];
-            weatherConditionCode = doc["weather"][0]["id"];
-            weatherDescription = String(description);
+    solenoid.begin(NUM_OUTPUS, MOTOR_PIN, SOLENOID_ON_DELAY, SOLENOID_OFF_DELAY);
+    solenoid.setSolenoidPins(arSolenoidPin);
+    if (rtc.begin()) {
+        Serial.println("RTC is running");
+        rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    } else {
+        Serial.println("Couldn't find RTC");
+    }
+    scheduler.addTask(1818, arSolenoidActiveDuration);
+    scheduler.addTask(1822, arSolenoidActiveDuration);
+    scheduler.addTask(2825, arSolenoidActiveDuration);
 
-            Serial.print("Weather Description: ");
-            Serial.println(description);
+    ePaper_Init();
+    Serial.println("System running...");
+    ticker.attach(1, onTimer);
 
-            // Cancel tasks if weather condition is not clear sky (800)
-            if (weatherConditionCode != 800) {
-                scheduler.cancelAllTasks();
-                Serial.println("Weather is not clear. All tasks have been cancelled.");
-            }
-            ePaper_Init();
-        }
-      } else {
-        Serial.println("Error: Unable to fetch weather data");
-      }
-      http.end();
-        // // Initialize NTP client
-        // timeClient.begin();
-        // timeClient.update();
-        // //buat ngecek apakah waktu sudah di set atau belum
-        // Serial.print("NTP time: ");
-        // Serial.println(timeClient.getFormattedTime());
-        // // Set RTC time
-        // rtc.adjust(DateTime(timeClient.getEpochTime()));
-      } else {
-        Serial.println("WiFi not connected");
-      }
-
-  // this will turn on motor pump after 1000ms and turn off after 2000ms
-  solenoid.begin(NUM_OUTPUS, MOTOR_PIN, SOLENOID_ON_DELAY, SOLENOID_OFF_DELAY);
-  solenoid.setSolenoidPins(arSolenoidPin);
-  if (rtc.begin())
-  {
-    Serial.println("RTC is running");
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-  }
-  else {
-    Serial.println("Couldn't find RTC"); 
-  }
-  scheduler.addTask(1818, arSolenoidActiveDuration);
-  scheduler.addTask(1822, arSolenoidActiveDuration);
-  scheduler.addTask(2825, arSolenoidActiveDuration);
-
-  ePaper_Init();
-  Serial.println("System running...");
-  ticker.attach(1, onTimer); 
-  scheduler.start(currentTime());
-  //weatherTicker.attach(1800, checkWeather);
+    // Ensure weather check is done before starting the schedule
+    weatherTicker.attach(10, checkWeather);
 }
 
 void loop() {
+    if (!hasCheckedWeather) {
+        // Wait for the initial weather check to complete
+        delay(1000);
+        return;
+    }
 
+    if (shouldRunSchedule) {
+        scheduler.start(m_now);
+        shouldRunSchedule = false; // Ensure the schedule only runs once
+        weatherTicker.attach(1800, checkWeather); // Check weather every 30 minutes
+    }
 }
 
 /*******************************************************************************************/
 // ePaper functions
 void ePaper_Init()
 {
-  epaperDisplay.init(); 
-  epaperDisplay.setRotation(1);
-  epaperDisplay.setFont(&FreeMonoBold9pt7b);
-  epaperDisplay.setTextColor(GxEPD_BLACK);
-  ePaper_displayText(1, ALLIGN_CENTER, "SMART IRRIGATION");
-  ePaper_displayText(2, ALLIGN_LEFT, "Weather: ", weatherDescription);
-  ePaper_displayText(3, ALLIGN_LEFT, "Pump :ON");
-  ePaper_displayText(4, ALLIGN_LEFT, "Valve:OFF OFF OFF");
-  ePaper_displaySchedule();
-  ePaper_displayClock(rtc.now());
+    epaperDisplay.init();
+    epaperDisplay.setRotation(1);
+    epaperDisplay.setFont(&FreeMonoBold9pt7b);
+    epaperDisplay.setTextColor(GxEPD_BLACK);
+
+    epaperDisplay.setFullWindow();
+    epaperDisplay.firstPage();
+    do {
+        int y = 15; // Starting Y position
+        epaperDisplay.setCursor(0, y);
+        epaperDisplay.print("   SMART IRRIGATION");
+
+        y += 15; // Move to the next line
+        epaperDisplay.setCursor(0, y);
+        epaperDisplay.print("Weather: ");
+        epaperDisplay.println(weatherDescription);
+
+        y += 15; // Move to the next line
+        epaperDisplay.setCursor(0, y);
+        epaperDisplay.print("Pump: ");
+        epaperDisplay.println(solenoidStatus[0] || solenoidStatus[1] || solenoidStatus[2] ? "ON" : "OFF");
+
+        y += 15; // Move to the next line
+        epaperDisplay.setCursor(0, y);
+        epaperDisplay.print("Valve:");
+        for (int i = 0; i < NUM_OUTPUS; i++) {
+            epaperDisplay.print(solenoidStatus[i] ? " ON" : " OFF");
+        }
+        epaperDisplay.println();
+
+        y += 15; // Move to the next line
+        epaperDisplay.setCursor(0, y);
+        epaperDisplay.printf("Sched: %02d of %02d -> %02d:%02d",
+                             scheduler.currentIdx() + 1, scheduler.count(), 16, 15);
+
+        y += 15; // Move to the next line
+        epaperDisplay.setCursor(0, y);
+        DateTime now = rtc.now();
+        epaperDisplay.printf("%02d/%02d/%04d %02d:%02d:%02d", 
+                             now.day(), now.month(), now.year(), 
+                             now.hour(), now.minute(), now.second());
+    } while (epaperDisplay.nextPage());
 }
 
 void ePaper_displayText(int row, TextAllign allign, const char* szFmt, ...)
