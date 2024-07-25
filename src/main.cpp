@@ -10,6 +10,7 @@ Example:
 */
 
 #include <Arduino.h>
+#include <string.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <stdarg.h>
@@ -17,31 +18,40 @@ Example:
 #include <RTClib.h>
 #include <NTPClient.h>
 #include <GxEPD2_BW.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include <SPI.h>
 #include <Fonts/FreeMonoBold9pt7b.h>
 #include "Solenoid.h"
 #include "Scheduler.h"
 #include "ArduinoJson.h"
+
+// UUIDs for the BLE Service and Characteristics
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+
+#define NUM_OUTPUTS 3
+#define MOTOR_PIN 25
+#define SOLENOID_ON_DELAY 1000 // ini adalah delay output dalam miliseconds
+#define SOLENOID_OFF_DELAY 2000
 
 GxEPD2_BW<GxEPD2_213_B74, GxEPD2_213_B74::HEIGHT> epaperDisplay(GxEPD2_213_B74(/*CS=5*/ 5, /*DC=*/ 17, /*RST=*/ 16, /*BUSY=*/ 4)); // GDEM0213B74 122x250, SSD1680
 enum TextAllign {ALLIGN_CENTER, ALLIGN_LEFT, ALLIGN_RIGHT};
 
 RTC_DS3231 rtc;
 
-#define NUM_OUTPUS 3
-#define MOTOR_PIN 25
-#define SOLENOID_ON_DELAY 1000 // ini adalah delay output dalam miliseconds
-#define SOLENOID_OFF_DELAY 2000
 
-// ini adalah durasi output dalam Seconds
-const int8_t arSolenoidPin[NUM_OUTPUS] = {26, 27, 12};
-uint16_t arSolenoidActiveDuration[NUM_OUTPUS] = {2, 2, 2};
-bool solenoidStatus[NUM_OUTPUS] = {false, false, false};
+const int8_t arSolenoidPin[NUM_OUTPUTS] = {26, 27, 12};
+
+bool solenoidStatus[NUM_OUTPUTS] = {false, false, false};
 
 const char* ssid = "Tamaki";
 const char* password = "wunangcepe";
 
-// WiFiUDP ntpUDP;
-// NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200, 60000);
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200, 60000);
 
 String URL = "http://api.openweathermap.org/data/2.5/weather?";
 String ApiKey = "9a553a4d189678d8d2945eee265c3133";
@@ -55,6 +65,9 @@ Ticker ledBlinkOff;
 String weatherDescription = "Unknown";
 int weatherConditionCode = 0;
 
+BLEServer* pServer = NULL;
+BLECharacteristic* pCharacteristic = NULL;
+bool deviceConnected = false;
 
 void onScheduleExecute(const uint16_t arDuration[]);
 void ePaper_Init();
@@ -67,12 +80,99 @@ bool shouldRunSchedule = false;
 bool hasCheckedWeather = false;
 uint16_t m_now=0000;
 
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      deviceConnected = true;
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+      deviceConnected = false;
+    }
+};
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    std::string value = pCharacteristic->getValue();
+    if (value.length() > 0) {
+      Serial.println("*********");
+      Serial.print("Received Value Length: ");
+      Serial.println(value.length());
+      Serial.print("Received Value: ");
+      Serial.println(value.c_str());
+
+      char input[value.length() + 1];
+      strcpy(input, value.c_str());
+
+      // Maximum number of schedules expected
+      uint16_t timeArray[MAX_SCHEDULER_COUNT];
+      uint16_t activeDurationArray[MAX_SCHEDULER_COUNT][NUM_OUTPUTS];
+      int scheduleCount = 0;
+
+      // Split the input string by semicolons
+      char* schedule = strtok(input, ";");
+
+      while (schedule != NULL && scheduleCount < MAX_SCHEDULER_COUNT) {
+        Serial.print("Schedule Count: ");
+        Serial.println(scheduleCount);
+        // Split each schedule by commas
+        char* timeString = strtok(schedule, ",");
+        char* durationString1 = strtok(NULL, ",");
+        char* durationString2 = strtok(NULL, ",");
+        char* durationString3 = strtok(NULL, ",");
+
+        // Split the time part by the colon
+        char* hoursString = strtok(timeString, ":");
+        char* minutesString = strtok(NULL, ":");
+
+        // Convert strings to integers
+        int hours = atoi(hoursString);
+        int minutes = atoi(minutesString);
+        int duration1 = durationString1 ? atoi(durationString1) : 0;
+        int duration2 = durationString2 ? atoi(durationString2) : 0;
+        int duration3 = durationString3 ? atoi(durationString3) : 0;
+
+        // Combine hours and minutes into a single integer
+        timeArray[scheduleCount] = static_cast<uint16_t>(hours * 100 + minutes);
+        activeDurationArray[scheduleCount][0] = static_cast<uint16_t>(duration1);
+        activeDurationArray[scheduleCount][1] = static_cast<uint16_t>(duration2);
+        activeDurationArray[scheduleCount][2] = static_cast<uint16_t>(duration3);
+
+        // Print the parsed values for debugging
+        Serial.print("Time[");
+        Serial.print(scheduleCount);
+        Serial.print("]: ");
+        Serial.println(timeArray[scheduleCount]);
+        
+        Serial.print("activeDurationArray[");
+        Serial.print(scheduleCount);
+        Serial.print("]: ");
+        Serial.print(activeDurationArray[scheduleCount][0]);
+        Serial.print(", ");
+        Serial.print(activeDurationArray[scheduleCount][1]);
+        Serial.print(", ");
+        Serial.println(activeDurationArray[scheduleCount][2]);
+
+        // Move to the next schedule
+        schedule = strtok(NULL, ";");
+        scheduleCount++;
+      }
+
+      // Call scheduler.addTask for each parsed schedule (assuming the function exists)
+      for (int i = 0; i < scheduleCount; i++) {
+        scheduler.addTask(timeArray[i], activeDurationArray[i]);
+      }
+
+      Serial.println("*********");
+    }
+  }
+};
+
 void onScheduleExecute(const uint16_t arDuration[]) {
   Serial.printf("onScheduleExecute %d of %d\n", scheduler.currentIdx()+1, scheduler.count());
   ePaper_displaySchedule();
   solenoid.setSolenoidDuration(arDuration);
   solenoid.start();
-  for (int i = 0; i < NUM_OUTPUS; i++) {
+  for (int i = 0; i < NUM_OUTPUTS; i++) {
       solenoidStatus[i] = true;
   }
   ePaper_Init();
@@ -159,13 +259,40 @@ void checkWeather() {
     }
 }
 
+void bluetoothInitialization(){
+  BLEDevice::init("ESP32_Test");
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  pCharacteristic = pService->createCharacteristic(
+                      CHARACTERISTIC_UUID,
+                      BLECharacteristic::PROPERTY_READ |
+                      BLECharacteristic::PROPERTY_WRITE
+                    );
+
+  pCharacteristic->setCallbacks(new MyCallbacks());
+  pCharacteristic->setValue("Hello World");
+
+  pService->start();
+
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+  pAdvertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+  Serial.println("Characteristic defined! Now you can read it in your phone!");
+}
+
 
 
 void setup() {
     Serial.begin(115200);
     connectToWiFi();
 
-    solenoid.begin(NUM_OUTPUS, MOTOR_PIN, SOLENOID_ON_DELAY, SOLENOID_OFF_DELAY);
+    solenoid.begin(NUM_OUTPUTS, MOTOR_PIN, SOLENOID_ON_DELAY, SOLENOID_OFF_DELAY);
     solenoid.setSolenoidPins(arSolenoidPin);
     if (rtc.begin()) {
         Serial.println("RTC is running");
@@ -173,9 +300,8 @@ void setup() {
     } else {
         Serial.println("Couldn't find RTC");
     }
-    scheduler.addTask(1818, arSolenoidActiveDuration);
-    scheduler.addTask(1822, arSolenoidActiveDuration);
-    scheduler.addTask(2825, arSolenoidActiveDuration);
+
+    bluetoothInitialization();
 
     ePaper_Init();
     Serial.println("System running...");
@@ -228,7 +354,7 @@ void ePaper_Init()
         y += 15; // Move to the next line
         epaperDisplay.setCursor(0, y);
         epaperDisplay.print("Valve:");
-        for (int i = 0; i < NUM_OUTPUS; i++) {
+        for (int i = 0; i < NUM_OUTPUTS; i++) {
             epaperDisplay.print(solenoidStatus[i] ? " ON" : " OFF");
         }
         epaperDisplay.println();
