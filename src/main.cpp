@@ -47,8 +47,8 @@ const int8_t arSolenoidPin[NUM_OUTPUTS] = {26, 27, 12};
 
 bool solenoidStatus[NUM_OUTPUTS] = {false, false, false};
 
-const char* ssid = "Tamaki";
-const char* password = "wunangcepe";
+const char* ssid = "POCOF4";
+const char* password = "g47=m249";
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200, 60000);
@@ -75,6 +75,7 @@ void ePaper_displayText(int row, TextAllign allign, const char* szFmt, ...);
 void ePaper_updateDisplay();
 void ePaper_displayClock(const DateTime& now);
 void ePaper_displaySchedule();
+void checkWeather();
 Scheduler scheduler(onScheduleExecute);
 bool shouldRunSchedule = false;
 bool hasCheckedWeather = false;
@@ -169,6 +170,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
 
 void onScheduleExecute(const uint16_t arDuration[]) {
   Serial.printf("onScheduleExecute %d of %d\n", scheduler.currentIdx()+1, scheduler.count());
+  checkWeather();
   ePaper_displaySchedule();
   solenoid.setSolenoidDuration(arDuration);
   solenoid.start();
@@ -282,6 +284,8 @@ void bluetoothInitialization(){
   pAdvertising->setScanResponse(true);
   pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
   pAdvertising->setMinPreferred(0x12);
+  pAdvertising->setMinInterval(0x20);
+  pAdvertising->setMaxInterval(0x40);
   BLEDevice::startAdvertising();
   Serial.println("Characteristic defined! Now you can read it in your phone!");
 }
@@ -290,16 +294,29 @@ void bluetoothInitialization(){
 
 void setup() {
     Serial.begin(115200);
+    while (!rtc.begin()) {
+        Serial.println("Couldn't find RTC. Retrying in 1 second...");
+        delay(1000); // Wait for 1 second before retrying
+    }
+    Serial.println("RTC is running");
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    
     connectToWiFi();
 
     solenoid.begin(NUM_OUTPUTS, MOTOR_PIN, SOLENOID_ON_DELAY, SOLENOID_OFF_DELAY);
     solenoid.setSolenoidPins(arSolenoidPin);
-    if (rtc.begin()) {
-        Serial.println("RTC is running");
-        rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-    } else {
-        Serial.println("Couldn't find RTC");
-    }
+    
+    if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("Connected to WiFi");
+     // Initialize NTP client
+    timeClient.begin();
+    timeClient.update();
+    //buat ngecek apakah waktu sudah di set atau belum
+    Serial.print("NTP time: ");
+    Serial.println(timeClient.getFormattedTime());
+    // Set RTC time
+     rtc.adjust(DateTime(timeClient.getEpochTime()));
+   }
 
     bluetoothInitialization();
 
@@ -307,8 +324,8 @@ void setup() {
     Serial.println("System running...");
     ticker.attach(1, onTimer);
 
-    // Ensure weather check is done before starting the schedule
-    weatherTicker.attach(10, checkWeather);
+    // Ensure weather check is done before starting the schedule (in seconds)
+    weatherTicker.attach(180, checkWeather);
 }
 
 void loop() {
@@ -321,7 +338,7 @@ void loop() {
     if (shouldRunSchedule) {
         scheduler.start(m_now);
         shouldRunSchedule = false; // Ensure the schedule only runs once
-        weatherTicker.attach(1800, checkWeather); // Check weather every 30 minutes
+        // weatherTicker.attach(1800, checkWeather); // Check weather every 30 minutes
     }
 }
 
