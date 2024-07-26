@@ -55,8 +55,8 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200, 60000);
 
 String URL = "http://api.openweathermap.org/data/2.5/weather?";
 String ApiKey = "9a553a4d189678d8d2945eee265c3133";
-String lat = "-6.981779358476813";
-String lon = "110.41328171734197";
+String lat = "-6.195655091614932";
+String lon = "106.8196877017365";
 
 Solenoid solenoid;
 Ticker weatherTicker;
@@ -239,7 +239,7 @@ void checkWeather() {
                 Serial.printf("Weather Condition Code: %d\n", weatherConditionCode);
 
                 // Cancel tasks if weather condition is not clear sky (800)
-                if (weatherConditionCode != 800) {
+                if (weatherConditionCode < 700) {   //(weatherConditionCode != 800)
                     scheduler.cancelAllTasks();
                     shouldRunSchedule = false;
                     Serial.println("Weather is not clear. All tasks have been cancelled.");
@@ -300,7 +300,7 @@ void setup() {
     }
     Serial.println("RTC is running");
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-    
+
     connectToWiFi();
 
     solenoid.begin(NUM_OUTPUTS, MOTOR_PIN, SOLENOID_ON_DELAY, SOLENOID_OFF_DELAY);
@@ -338,7 +338,6 @@ void loop() {
     if (shouldRunSchedule) {
         scheduler.start(m_now);
         shouldRunSchedule = false; // Ensure the schedule only runs once
-        // weatherTicker.attach(1800, checkWeather); // Check weather every 30 minutes
     }
 }
 
